@@ -5,9 +5,8 @@ from skimage.metrics import structural_similarity as compare_ssim
 from skimage.metrics import peak_signal_noise_ratio as compare_psnr
 from torchvision.transforms import ToPILImage
 import numpy
-from vimeo_dataset import VimeoDataset
+from vimeo_dataset import Vimeo90kDataset
 from Hs_ergb_dataset import HsErgbDataset
-from mb_dataset_allframes import MbDataset
 from hqf_dataset import HqfDataset
 from utils.pytorch_msssim import ssim_matlab
 from tqdm import tqdm
@@ -27,12 +26,6 @@ torch.backends.cudnn.benchmark = True
 def model_eval(model, skip, num_bins, eval_set, mode="test"):
     if eval_set == "Hqf":
         eval_dataset = HqfDataset(root="./dataset/Hqfdataset", num_bins=num_bins, num_inter=skip)
-
-    elif eval_set == "middlebury":
-        eval_dataset = MbDataset(root="D:\\LHX\\CVPR\\dataset\\Md_eval_allframes",
-                                 num_bins=num_bins,
-                                 skip_frames=skip,
-                                 num_inter=skip)
     elif eval_set == "Hs_ergb_far":
         eval_dataset = HsErgbDataset(root="./dataset/hs_ergb_dataset",
                                      num_inter=skip, mode="far")
@@ -40,7 +33,7 @@ def model_eval(model, skip, num_bins, eval_set, mode="test"):
         eval_dataset = HsErgbDataset(root="./dataset/hs_ergb_dataset",
                                      num_inter=skip, mode="close")
     elif eval_set == "triplet_test" or eval_set == "septuplet_test":
-        eval_dataset = VimeoDataset(tri_root="./dataset/vimeo_triplet",
+        eval_dataset = Vimeo90kDataset(tri_root="./dataset/vimeo_triplet",
                                     sep_root="./dataset/vimeo_septuplet",
                                     num_bins=num_bins,
                                     mode=eval_set,
