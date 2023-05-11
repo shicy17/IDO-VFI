@@ -14,23 +14,24 @@ Eprint = {},
 }  
 ****
 💥Highlights
+
+# Datasets
 ****
-Datasets
-You can organize the 'data' folder as follows:
-data/
-  ├── Hqfdataset
-       ├── bike_bay_hdr.h5
-       ...
-       └── still_life.h5
+You can organize the 'data' folder as follows:\
+data/\
+  ├── Hqfdataset\
+       ├── bike_bay_hdr.h5\
+       ...\
+       └── still_life.h5\
+ # Running
 ****
-# Running
-Evaluation
+Evaluation\
 python --test.py \
---eval_dataset Hqf
+--eval_dataset Hqf\
 --n_skip 1  \
 --load_model Hqf.pth \
-****
 # pre-trained Model
+****
 We provide our pretrained models on Google Drive.
 ****
 
