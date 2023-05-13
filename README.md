@@ -1,5 +1,5 @@
 # IDO-VFI
-This repository is an official implementation of IDO-VFI:\
+This repository is an official implementation of IDO-VFI:
 For academic use only.
 
 ****
@@ -13,6 +13,7 @@ Title = {},
 Year = {2023},  
 Eprint = {},  
 }  
+
 ****
 💥Highlights
 
@@ -60,4 +61,10 @@ python --test.py --eval_dataset Hqf --n_skip 1  --load_model ./Hqf.pth
 
 ****
 
-# 
+# Reference
+
+Some other great video interpolation resources that we benefit from:
+
+[zhshi0816/Video-Frame-Interpolation-Transformer (github.com)](https://github.com/zhshi0816/Video-Frame-Interpolation-Transformer)
+
+[uzh-rpg/rpg_timelens: Repository relating to the CVPR21 paper TimeLens: Event-based Video Frame Interpolation (github.com)](https://github.com/uzh-rpg/rpg_timelens)
