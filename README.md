@@ -65,6 +65,6 @@ python --test.py --eval_dataset Hqf --n_skip 1  --load_model ./Hqf.pth
 
 Some other great video interpolation resources that we benefit from:
 
-[zhshi0816/Video-Frame-Interpolation-Transformer (github.com)](https://github.com/zhshi0816/Video-Frame-Interpolation-Transformer)
+[VFIT-B](https://github.com/zhshi0816/Video-Frame-Interpolation-Transformer)
 
-[uzh-rpg/rpg_timelens: Repository relating to the CVPR21 paper TimeLens: Event-based Video Frame Interpolation (github.com)](https://github.com/uzh-rpg/rpg_timelens)
+[TimeLens](https://github.com/uzh-rpg/rpg_timelens)
