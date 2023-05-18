@@ -1,5 +1,5 @@
 # IDO-VFI
-This repository is an official implementation of IDO-VFI:
+This repository is an official implementation of IDO-VFI.  
 For academic use only.
 
 ****
