@@ -3,7 +3,7 @@ This repository is an official implementation of IDO-VFI:
 For academic use only.
 
 ****
-👉Citation   
+# 👉Citation   
 Citations are welcome, and if you use all or part of our code in a published article or project, please cite the preprint version of our article that available on arXiv [IDO-VFI](https://arxiv.org/abs/2305.10198).
 
 BibTeX of the preprint version:  
@@ -17,8 +17,12 @@ BibTeX of the preprint version:
 }
 
 ****
-💥Highlights
+# 💥Highlights  
+(1) A novel and trainable optical flow guidance mechanism for identifying the dynamics of the boundary frames and events is proposed, considering the corresponding relationship between adjacent dynamic regions. 
 
+(2) We propose an event-based residual optical flow estimation method to further dynamically evaluate the optical flow field, of which the computation time and computational effort are reduced by 10\% and 17\% respectively, while the performance is almost the same as processing the whole image without distinction.  
+
+(3) Our proposed method achieves state-of-the-art results on multiple benchmark datasets compared to frame-only and events-plus-frames VFI methods.  
 ****
 
 # Installation
@@ -70,3 +74,5 @@ Some other great video interpolation resources that we benefit from:
 [VFIT-B](https://github.com/zhshi0816/Video-Frame-Interpolation-Transformer)
 
 [TimeLens](https://github.com/uzh-rpg/rpg_timelens)
+
+If you use our entire codes, please cite the methods above as well.
