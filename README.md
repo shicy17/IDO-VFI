@@ -4,7 +4,7 @@ For academic use only.
 
 ****
 # 👉Citation   
-Citations are welcome, and if you use all or part of our code in a published article or project, please cite the preprint version of our article that available on arXiv [IDO-VFI](https://arxiv.org/abs/2305.10198).
+Citations are welcome, and if you use all or part of our codes in a published article or project, please cite the preprint version of our article that available on arXiv [IDO-VFI](https://arxiv.org/abs/2305.10198).
 
 BibTeX of the preprint version:  
 @misc{shi2023idovfi,  
