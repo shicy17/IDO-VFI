@@ -67,7 +67,7 @@ python --test.py --eval_dataset Hqf --n_skip 1  --load_model ./Hqf.pth
 
 ****
 
-# Reference
+# References
 
 Some other great video interpolation resources that we benefit from:
 
