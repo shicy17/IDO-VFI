@@ -8,13 +8,13 @@ For academic use only.
 Citations are welcome, and if you use all or part of our codes in a published article or project, please cite the preprint version of our article that available on arXiv [IDO-VFI](https://arxiv.org/abs/2305.10198).
 
 BibTeX of the preprint version:
-@misc{shi2023idovfi,
-title={IDO-VFI: Identifying Dynamics via Optical Flow Guidance for Video Frame Interpolation with Events},
-author={Chenyang Shi and Hanxiao Liu and Jing Jin and Wenzhuo Li and Yuzhen Li and Boyi Wei and Yibo Zhang},
-year={2023},
-eprint={2305.10198},
-archivePrefix={arXiv},
-primaryClass={cs.CV}
+@misc{shi2023idovfi,  
+title={IDO-VFI: Identifying Dynamics via Optical Flow Guidance for Video Frame Interpolation with Events},  
+author={Chenyang Shi and Hanxiao Liu and Jing Jin and Wenzhuo Li and Yuzhen Li and Boyi Wei and Yibo Zhang},  
+year={2023},  
+eprint={2305.10198},  
+archivePrefix={arXiv},  
+primaryClass={cs.CV}  
 }
 
 ****
