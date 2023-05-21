@@ -11,159 +11,126 @@ def get_voxel_grid(xs, ys, ts, ps, num_bins, H, W):
     voxel_grid = events_to_voxel_torch(xs, ys, ts, ps, num_bins, sensor_size=(H, W))
     return voxel_grid
 
+
 class HqfDataset():
-    def __init__(self, root, num_bins=5, num_inter=1):
+    def __init__(self, root, num_bins=5, skip_frames=1, num_inter=1, label_require=True):
+        self.skip_frames = skip_frames
+        self.label_require = label_require
         self.num_bins = num_bins
         self.root = root
         self.num_inter = num_inter
-        self.imgs = []
-        self.events = []
-        self.start_image_index = []
+        self.data_dic = []
         self.splite_dataset()
 
     def __getitem__(self, index):
-        events_t_0 = []
-        events_t_1 = []
-        events_0_1 = []
-        events_1_0 = []
+        data = self.data_dic[index]
+        I0 = data["start_image"]
+        I1 = data["end_image"]
+        I0 = transforms.ToTensor()(I0)
+        I1 = transforms.ToTensor()(I1)
+        input_images = [I0, I1]
+        start_time = data["timestamps"][0]
+        end_time = data["timestamps"][1]
+        (H, W) = (I0.shape[-2], I1.shape[-1])
+        event_0_1 = data["event_sequences"]
+        event_0_1[:,3]=event_0_1[:,3]*2 - 1 # polarity [0,1]>[-1,1]
+        voxel_grid_0_1 = self.event_sequence_to_voxel_grid(event_0_1, start_time, end_time, 2 * self.num_bins, H, W,
+                                                           reverse=False)
+        voxel_grid_1_0 = self.event_sequence_to_voxel_grid(event_0_1, start_time, end_time, 2 * self.num_bins, H, W,
+                                                           reverse=True)
+        voxel_grids_t_0 = []
+        voxel_grids_t_1 = []
         true_images = []
-
-        index = self.start_image_index[index]
-        start_image = self.imgs[index]
-        end_image = self.imgs[index + self.num_inter + 1]
-        transform_start_image = transforms.ToTensor()(start_image)
-        transform_end_image = transforms.ToTensor()(end_image)
-        input_images = [transform_start_image, transform_end_image]
-        (H, W) = (transform_start_image.shape[-2], transform_start_image.shape[-1])
+        mid_timestamps = numpy.linspace(start_time, end_time, self.num_inter + 2)[1:-1]
         for inter_index in range(self.num_inter):
-            true_image = self.imgs[inter_index + index + 1]
-            transform_true_image = transforms.ToTensor()(true_image)
-            true_images.append(transform_true_image)
+            if self.label_require:
+                inter_data = data["mid"][inter_index]
+                mid_timestamp = inter_data["mid_timestamp"]
+                true_image = transforms.ToTensor()(inter_data["true_image"])
+                true_images.append(true_image)
+            else:
+                mid_timestamp = mid_timestamps[inter_index]
+            event_0_t_mask = (start_time <= event_0_1[:, 2]) & (mid_timestamp > event_0_1[:, 2])
 
-            event_t_0, event_t_1, event_0_1, event_1_0 = self.load_events_data(index,inter_index, H, W)
-            events_t_0.append(event_t_0)
-            events_t_1.append(event_t_1)
-            events_0_1.append(event_0_1)
-            events_1_0.append(event_1_0)
-        return input_images, true_images, events_t_0, events_t_1, events_0_1[0],events_1_0[0]
+            event_0_t = event_0_1[event_0_t_mask]
+            event_t_1_mask = (mid_timestamp <= event_0_1[:, 2]) & (end_time > event_0_1[:, 2])
+            event_t_1 = event_0_1[event_t_1_mask]
+            voxel_grid_t_0 = self.event_sequence_to_voxel_grid(event_0_t, start_time, mid_timestamp, self.num_bins, H,
+                                                               W,
+                                                               reverse=True)
+            voxel_grid_t_1 = self.event_sequence_to_voxel_grid(event_t_1, mid_timestamp, end_time, self.num_bins, H, W,
+                                                               reverse=False)
+            voxel_grids_t_0.append(voxel_grid_t_0)
+            voxel_grids_t_1.append(voxel_grid_t_1)
+        return input_images, true_images, voxel_grids_t_0, voxel_grids_t_1, voxel_grid_0_1, voxel_grid_1_0
 
-    def load_events_data(self,index,inter_index, H, W):
-        x, y, t, p = numpy.array([]), numpy.array([]), numpy.array([]), numpy.array([])
-        for before_event_index in range(index + 1, index + inter_index + 2):
-            event_data = self.events[before_event_index]
-            if len(event_data["t"]) > 0 and event_data["t"][-1] != event_data["t"][0]:
-                x = numpy.hstack((x, event_data["x"].astype(numpy.float32).reshape((-1,))))
-                y = numpy.hstack((y, event_data["y"].astype(numpy.float32).reshape((-1,))))
-                t = numpy.hstack((t, event_data["t"].astype(numpy.float32).reshape((-1,))))
-                p = numpy.hstack((p, event_data["p"].astype(numpy.float32).reshape((-1,))*2-1))
+    def event_sequence_to_voxel_grid(self, event_sequence, start_time, end_time, num_bins, H, W, reverse=False):
+        x = event_sequence[:, 0]
+        y = event_sequence[:, 1]
+        t = event_sequence[:, 2]
+        p = event_sequence[:, 3]
+        try:
+            dt = t[-1] - t[0]
+        except:
+            dt=0
+        # if dt==0,inf will appear in voxelgrid
+        if len(x) != len(y) or len(y) != len(t) or len(t) != len(p) or len(x) == 0 or dt == 0:
+            print("empty or abnormal event sequence:")
+            return torch.zeros(num_bins, H, W)
+        t = t - start_time
+        if reverse:
+            t = end_time - t
+            p = -p
+            x = numpy.flipud(x)
+            y = numpy.flipud(y)
+            t = numpy.flipud(t)
+            p = numpy.flipud(p)
 
-        if 0 < len(t) == len(y) and len(x) == len(y) and len(t) == len(p):
-            mask = (x <= W - 1) & (y <= H - 1) & (x >= 0) & (y >= 0)
-            x_ = x[mask]
-            y_ = y[mask]
-            p_ = p[mask]
-            t_ = t[mask]
-            t_ = t_.max() + t_.min() - t_
-            t_ = t_[::-1]
-            x_ = x_[::-1]
-            y_ = y_[::-1]
-            p_ = -p_[::-1]
-            event_t_0 = get_voxel_grid(torch.from_numpy(x_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(y_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(t_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(p_.copy().astype(numpy.float32)), self.num_bins, H, W)
-        else:
-            event_t_0 = torch.zeros(self.num_bins, H, W)
-
-        x2, y2, t2, p2 = numpy.array([]), numpy.array([]), numpy.array([]), numpy.array([])
-        for after_event_index in range(index + inter_index + 2, index + self.num_inter + 2):
-            event_data = self.events[after_event_index]
-            if len(event_data["t"]) > 0 and event_data["t"][-1] != event_data["t"][0]:
-                x2 = numpy.hstack((x2, event_data["x"].astype(numpy.float32).reshape((-1,))))
-                y2 = numpy.hstack((y2, event_data["y"].astype(numpy.float32).reshape((-1,))))
-                t2 = numpy.hstack((t2, event_data["t"].astype(numpy.float32).reshape((-1,))))
-                p2 = numpy.hstack((p2, event_data["p"].astype(numpy.float32).reshape((-1,))*2-1))
-        if 0 < len(t2) == len(y2) and len(x2) == len(y2) and len(t2) == len(p2):
-            mask = (x2 <= W - 1) & (y2 <= H - 1) & (x2 >= 0) & (y2 >= 0)
-            x_ = x2[mask]
-            y_ = y2[mask]
-            p_ = p2[mask]
-            t_ = t2[mask]
-            event_t_1 = get_voxel_grid(torch.from_numpy(x_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(y_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(t_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(p_.copy().astype(numpy.float32)), self.num_bins, H, W)
-        else:
-            event_t_1 = torch.zeros(self.num_bins, H, W)
-
-        total_x = numpy.hstack((x, x2))
-        total_y = numpy.hstack((y, y2))
-        total_t = numpy.hstack((t, t2))
-        total_p = numpy.hstack((p, p2))
-        if 0 < len(total_t) == len(total_x) and len(total_x) == len(total_y) and len(total_y) == len(total_p):
-            mask = (total_x <= W - 1) & (total_y <= H - 1) & (total_x >= 0) & (total_y >= 0)
-            x_ = total_x[mask]
-            y_ = total_y[mask]
-            p_ = total_p[mask]
-            t_ = total_t[mask]
-            reverse_t_ = t_.max() + t_.min() - t_
-            reverse_t_ = reverse_t_[::-1]
-            reverse_x_ = x_[::-1]
-            reverse_y_ = y_[::-1]
-            reverse_p_ = -p_[::-1]
-            event_0_1 = get_voxel_grid(torch.from_numpy(x_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(y_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(t_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(p_.copy().astype(numpy.float32)), 2 * self.num_bins, H, W)
-
-            event_1_0 = get_voxel_grid(torch.from_numpy(reverse_x_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(reverse_y_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(reverse_t_.copy().astype(numpy.float32)),
-                                       torch.from_numpy(reverse_p_.copy().astype(numpy.float32)), 2 * self.num_bins, H,
-                                       W)
-        else:
-            event_0_1 = torch.zeros(2 * self.num_bins, H, W)
-            event_1_0 = torch.zeros(2 * self.num_bins, H, W)
-        return event_t_0, event_t_1, event_0_1, event_1_0
+        t_norm = (t - t[0]) / dt
+        voxel_grid = get_voxel_grid(torch.from_numpy(x.copy().astype(numpy.float32)),
+                                    torch.from_numpy(y.copy().astype(numpy.float32)),
+                                    torch.from_numpy(t_norm.copy().astype(numpy.float32)),
+                                    torch.from_numpy(p.copy().astype(numpy.float32)), num_bins, H, W)
+        return voxel_grid
 
     def __len__(self):
-        return len(self.start_image_index)
-
-
+        return len(self.data_dic)
 
     def splite_dataset(self):
         h5_paths = sorted(glob.glob(os.path.join(self.root, "*.h5")))
         print(h5_paths)
-        total_frame_index = 0
         for h5_path in h5_paths:
+            imgs = []
+            time_stamp_list = []
+            event_index_list = []
             f = h5py.File(h5_path, 'r')
-            last_event_index = 0
-            h5_index = 0
-            ts=f["events/ts"][:]-f["events/ts"][0]
+            event_sequence = numpy.stack((f["events/xs"], f["events/ys"], f["events/ts"], f["events/ps"]), axis=-1)
             for img_dataset in f["images"]:
+                # print(f["images"][img_dataset].attrs.keys())
                 img = f["images"][img_dataset][:]
-                # print(f["images"][img_dataset].attrs["timestamp"])
-                self.imgs.append(img)
-                if h5_index % (self.num_inter + 1) == 0 and (h5_index + self.num_inter + 1) < len(f["images"]):
-                    self.start_image_index.append(total_frame_index)
-                total_frame_index += 1
-                event_index = f["images"][img_dataset].attrs["event_idx"]
-                event_data = {'x': f["events/xs"][last_event_index:event_index + 1],
-                              'y': f["events/ys"][last_event_index:event_index + 1],
-                              't': ts[last_event_index:event_index + 1],
-                              'p': f["events/ps"][last_event_index:event_index + 1]}
-                self.events.append(event_data)
-                last_event_index = event_index
-                h5_index += 1
+                imgs.append(img)
+                time_stamp_list.append(f["images"][img_dataset].attrs["timestamp"])
+                event_index_list.append(f["images"][img_dataset].attrs["event_idx"])
+            for i in range(len(imgs)):
+                if i % (self.skip_frames + 1) == 0 and (i + self.skip_frames + 1) < len(f["images"]):
+                    start_img_index = i
+                    end_img_index = start_img_index + self.skip_frames + 1
+                    inter_events = event_sequence[event_index_list[start_img_index]+1:event_index_list[end_img_index], :]
+                    timestamp_list = [time_stamp_list[start_img_index],
+                                      time_stamp_list[end_img_index]]
+                    data = {"start_image": imgs[start_img_index],
+                            "end_image": imgs[end_img_index],
+                            "mid": [],
+                            "timestamps": timestamp_list,
+                            "event_sequences": inter_events
+                            }
 
+                    if self.label_require:
+                        for j in range(self.num_inter):
+                            true_img_index = start_img_index + j + 1
+                            true_img = imgs[true_img_index]
+                            data["mid"].append(
+                                {"true_image": true_img,
+                                 "mid_timestamp": time_stamp_list[true_img_index]})
+                    self.data_dic.append(data)
 
-if __name__ == '__main__':
-    validation_dataset = HqfDataset(root="D:\\LHX\\CVPR\\dataset\\Hqfdataset", num_inter=3)
-    validation_dataloader = torch.utils.data.DataLoader(
-        validation_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=1)
-    print(len(validation_dataset))
-    for i, data in enumerate(validation_dataloader):
-        print("  ")

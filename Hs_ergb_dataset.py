@@ -49,11 +49,6 @@ class HsErgbDataset():
         voxel_grids_t_1 = []
         true_images = []
         mid_timestamps = numpy.linspace(start_time, end_time, self.num_inter + 2)[1:-1]
-        # print("frame_time",data["timestamps"])
-        # print("event_file",data["event_files"])
-        # print("boundary_image",data["start_image"],data["end_image"])
-        # print("events",event_0_1[:,2])
-        # print("mid_time",mid_timestamps)
 
         for inter_index in range(self.num_inter):
             if self.label_require:
@@ -150,8 +145,6 @@ class HsErgbDataset():
             f.close()
             for i in range(len(image_files)):
                 if i % (self.skip_frames + 1) == 0:
-                    if i%((self.skip_frames + 1)*3)!=0 and self.mode == "close":
-                        continue
                     start_img_index = i
                     end_img_index = start_img_index + self.skip_frames + 1
                     inter_events = []

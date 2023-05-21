@@ -4,7 +4,7 @@ import torch
 import torch.utils.data
 from tqdm import tqdm
 from PIL import Image
-from utils.event_utils import events_to_voxel_torch,events_to_timestamp_image,events_to_image_torch
+from utils.event_utils import events_to_voxel_torch
 import torchvision
 from PIL import Image
 import torchvision.transforms as transforms
@@ -12,11 +12,9 @@ import sys
 import glob
 from torchvision.transforms import ToPILImage
 
+
 # return (num_bins,H,W)
 def get_voxel_grid(xs, ys, ts, ps, num_bins, H, W):
-    # hot_events_mask = numpy.ones([num_bins, H,W])
-    # hot_events_mask = torch.from_numpy(hot_events_mask).float()
-    # generate voxel grid which has size self.num_bins x H x W
     voxel_grid = events_to_voxel_torch(xs, ys, ts, ps, num_bins, sensor_size=(H, W))
     # print('voxel',voxel_grid.size())
     # voxel_grid = voxel_grid * hot_events_mask
@@ -24,199 +22,159 @@ def get_voxel_grid(xs, ys, ts, ps, num_bins, H, W):
 
 
 class Vimeo90kDataset():
-    def __init__(self, tri_root, sep_root, img_size=None, mode='septuplet_train', num_bins=5, n_inputs=2, skip=1):
+    def __init__(self, root,img_size=None, mode='septuplet_train', num_bins=5, num_inter=1, skip=1,
+                 label_require=True):
         self.num_bins = num_bins
         self.img_size = img_size
-        self.tri_root = tri_root
-        self.sep_root = sep_root
+        self.root = root
         self.skip = skip
         self.data_dic = []
         self.mode = mode
-        self.n_inputs = n_inputs
-
+        self.label_require = label_require
+        self.num_inter = num_inter
         self.splite_dataset()
 
     def __getitem__(self, index):
-        events_t_0 = []
-        events_t_1 = []
-        events_0_1 = []
-        events_1_0 = []
         data = self.data_dic[index]
+        I0 = Image.open(data["start_image"])
+        I1 = Image.open(data["end_image"])
+        I0 = transforms.ToTensor()(I0)
+        I1 = transforms.ToTensor()(I1)
+        input_images = [I0, I1]
+        start_time = data["timestamps"][0]
+        end_time = data["timestamps"][1]
+        (H, W) = (I0.shape[-2], I1.shape[-1])
+        event_0_1 = self.load_events_data(data["event_files"], H, W)
+        voxel_grid_0_1 = self.event_sequence_to_voxel_grid(event_0_1, start_time, end_time, 2 * self.num_bins, H, W,
+                                                           reverse=False)
+        voxel_grid_1_0 = self.event_sequence_to_voxel_grid(event_0_1, start_time, end_time, 2 * self.num_bins, H, W,
+                                                           reverse=True)
+        voxel_grids_t_0 = []
+        voxel_grids_t_1 = []
+        true_images = []
+        mid_timestamps = numpy.linspace(start_time, end_time, self.num_inter + 2)[1:-1]
 
-        true_images = [transforms.ToTensor()(Image.open(image)) for image in data["true_images"]]
-        input_images = [transforms.ToTensor()(Image.open(image)) for image in data["input_images"]]
-        (H, W) = true_images[0].shape[-2], true_images[0].shape[-1]
-        # print(index, "   ",index + self.num_inter + 1)
-        for inter_index in range(self.skip):
-            event_t_0, event_t_1, event_0_1, event_1_0  = self.load_events_data(data["before_events"][inter_index],
-                                                                           data["after_events"][inter_index],
-                                                                           H, W)
-            events_t_0.append(event_t_0)
-            events_t_1.append(event_t_1)
-            events_0_1.append(event_0_1)
-            events_1_0.append(event_1_0)
-        return input_images, true_images, events_t_0, events_t_1, events_0_1[0],events_1_0[0]
+        for inter_index in range(self.num_inter):
+            if self.label_require:
+                inter_data = data["mid"][inter_index]
+                mid_timestamp = inter_data["mid_timestamp"]
+                true_image = transforms.ToTensor()(Image.open(inter_data["true_image"]))
+                true_images.append(true_image)
+            else:
+                mid_timestamp = mid_timestamps[inter_index]
+            event_0_t_mask = (start_time <= event_0_1[:, 2]) & (mid_timestamp > event_0_1[:, 2])
+            event_0_t = event_0_1[event_0_t_mask]
+            event_t_1_mask = (mid_timestamp <= event_0_1[:, 2]) & (end_time > event_0_1[:, 2])
+            event_t_1 = event_0_1[event_t_1_mask]
+            voxel_grid_t_0 = self.event_sequence_to_voxel_grid(event_0_t, start_time, mid_timestamp, self.num_bins, H,
+                                                               W,
+                                                               reverse=True)
+            voxel_grid_t_1 = self.event_sequence_to_voxel_grid(event_t_1, mid_timestamp, end_time, self.num_bins, H, W,
+                                                               reverse=False)
+            voxel_grids_t_0.append(voxel_grid_t_0)
+            voxel_grids_t_1.append(voxel_grid_t_1)
 
-    def load_events_data(self, before_event_files, after_event_files, H, W):
-        x, y, t, p = torch.tensor([]), torch.tensor([]), torch.tensor([]), torch.tensor([])
-        total_files = before_event_files + after_event_files
-        num_events_0_t = 0
-        for i in range(len(total_files)):
-            event_file = total_files[i]
+        return input_images, true_images, voxel_grids_t_0, voxel_grids_t_1, voxel_grid_0_1, voxel_grid_1_0
+
+    def event_sequence_to_voxel_grid(self, event_sequence, start_time, end_time, num_bins, H, W, reverse=False):
+        x = event_sequence[:, 0]
+        y = event_sequence[:, 1]
+        t = event_sequence[:, 2]
+        p = event_sequence[:, 3]
+        try:
+            dt = t[-1] - t[0]
+        except:
+            dt = 0
+        if len(x) != len(y) or len(y) != len(t) or len(t) != len(p) or len(x) == 0 or dt == 0:
+            print("empty or abnormal event sequence:")
+            return torch.zeros(num_bins, H, W)
+        t = t - start_time
+        if reverse:
+            t = end_time - t
+            p = -p
+            x = numpy.flipud(x)
+            y = numpy.flipud(y)
+            t = numpy.flipud(t)
+            p = numpy.flipud(p)
+        t_norm = (t - t[0]) / dt
+        voxel_grid = get_voxel_grid(torch.from_numpy(x.copy().astype(numpy.float32)),
+                                    torch.from_numpy(y.copy().astype(numpy.float32)),
+                                    torch.from_numpy(t_norm.copy().astype(numpy.float32)),
+                                    torch.from_numpy(p.copy().astype(numpy.float32)), num_bins, H, W)
+        return voxel_grid
+
+    def load_events_data(self, event_files, H, W):
+        x, y, t, p = numpy.array([]), numpy.array([]), numpy.array([]), numpy.array([])
+        for event_file in event_files:
             try:
                 event_data = numpy.load(event_file)
             except:
+                print("can't load file:", event_file)
                 continue
-            if len(event_data["arr_0"][:, 2]) > 1:
-                event_data["arr_0"][:, 2][-1] += 1
-                x = torch.cat([x, torch.from_numpy(event_data["arr_0"][:, 0].astype(numpy.float32).reshape((-1,)))], -1)
-                y = torch.cat([y, torch.from_numpy(event_data["arr_0"][:, 1].astype(numpy.float32).reshape((-1,)))], -1)
-                t = torch.cat([t, torch.from_numpy(event_data["arr_0"][:, 2].astype(numpy.float32).reshape((-1,)))], -1)
-                p = torch.cat([p, torch.from_numpy(event_data["arr_0"][:, 3].astype(numpy.float32).reshape((-1,)))], -1)
-            if i == (len(before_event_files) - 1):
-                num_events_0_t = len(x)
 
-        if len(t) > 0:
-            mask = (x <= W - 1) & (y <= H - 1) & (x >= 0) & (y >= 0)
-            x = x[mask]
-            y = y[mask]
-            p = p[mask]
-            t = t[mask]
-
-            reverse_t = t.max() + t.min() - t
-            reverse_t =torch.flip(reverse_t, [0])
-            reverse_x =torch.flip(x, [0])
-            reverse_y = torch.flip(y, [0])
-            reverse_p = -torch.flip(p, [0])
-
-            before_t = t[:num_events_0_t]
-            before_t = before_t.max() + before_t.min() - before_t
-            before_t = torch.flip(before_t, [0])
-            before_x = x[:num_events_0_t]
-            before_x = torch.flip(before_x, [0])
-            before_y = y[:num_events_0_t]
-            before_y = torch.flip(before_y, [0])
-            before_p = p[:num_events_0_t]
-            before_p = -torch.flip(before_p, [0])
-
-            event_0_1 = get_voxel_grid(x, y, t, p, 2*self.num_bins, H, W)
-            event_1_0 = get_voxel_grid(reverse_x, reverse_y, reverse_t, reverse_p, 2 * self.num_bins, H, W)
-            if len(before_t)>0:
-                event_t_0 = get_voxel_grid(before_x,before_y, before_t, before_p, self.num_bins, H, W)
-            else:
-                event_t_0 = torch.zeros(self.num_bins, H, W)
-            if len(t)>len(before_t):
-                event_t_1 = get_voxel_grid(x[num_events_0_t:], y[num_events_0_t:], t[num_events_0_t:], p[num_events_0_t:], self.num_bins, H, W)
-            else:
-                event_t_1 = torch.zeros(self.num_bins, H, W)
-
-        else:
-            event_t_0 = torch.zeros(self.num_bins, H, W)
-            event_t_1 = torch.zeros(self.num_bins, H, W)
-            event_0_1 = torch.zeros(2 * self.num_bins, H, W)
-            event_1_0= torch.zeros(2 * self.num_bins, H, W)
-        return event_t_0, event_t_1, event_0_1, event_1_0
+            x = numpy.hstack((x, event_data["arr_0"][:, 0].astype(numpy.float32).reshape((-1,))))
+            y = numpy.hstack((y, event_data["arr_0"][:, 1].astype(numpy.float32).reshape((-1,))))
+            t = numpy.hstack((t, event_data["arr_0"][:, 2].astype(numpy.float32).reshape((-1,))))
+            p = numpy.hstack((p, event_data["arr_0"][:, 3].astype(numpy.float32).reshape((-1,))))
+        mask = (x <= W - 1) & (y <= H - 1) & (x >= 0) & (y >= 0)
+        x_ = x[mask]
+        y_ = y[mask]
+        p_ = p[mask]
+        t_ = t[mask]
+        if len(x_) != len(y_) or len(y_) != len(t_) or len(t_) != len(p_) or len(x_) == 0:
+            print("empty or abnormal event sequence:", event_files)
+        event_sequence = numpy.stack((x_, y_, t_, p_), axis=-1)
+        return event_sequence
 
     def __len__(self):
         return len(self.data_dic)
 
     def splite_dataset(self):
-        if self.mode == 'triplet_train' or self.mode == 'triplet_test':
-            if self.mode == 'triplet_train':
-                list_path = os.path.join(self.tri_root, "tri_trainlist.txt")
-            else:
-                list_path = os.path.join(self.tri_root, "tri_testlist.txt")
-            with open(list_path, 'r') as file_to_read:
-                while True:
-                    lines = file_to_read.readline().strip('\n')  # 整行读取数据,去掉换行付
-                    # lines.strip()遇空白行返回FALSE
-                    if not lines or not lines.strip():
-                        break
-
-                    after_event_path = []
-                    before_event_path = []
-                    true_images_path = []
-                    input_images_path = []
-                    for i in range(1, 4):
-                        if i >= (2 - int(self.skip / 2)) and i <= (2 + int(self.skip / 2)):
-                            true_images_path.append(os.path.join(self.tri_root, "sequences", lines, "im%d.png" % i))
-                            inter_before_events = []
-                            inter_after_events = []
-
-                            for before_event_index in range(int(2 - self.n_inputs / 2 - int(self.skip / 2)) - 1, i - 1):
-                                inter_before_events.append(
-                                    os.path.join(self.tri_root, "events", lines, "%010d.npz" % before_event_index))
-                            for after_event_index in range(i - 1, int(2 + self.n_inputs / 2 + int(self.skip / 2)) - 1):
-                                inter_after_events.append(
-                                    os.path.join(self.tri_root, "events", lines, "%010d.npz" % after_event_index))
-                            before_event_path.append(inter_before_events)
-                            after_event_path.append(inter_after_events)
-                        elif i >= (2 - self.n_inputs / 2 - int(self.skip / 2)) and i <= (
-                                2 + self.n_inputs / 2 + int(self.skip / 2)):
-                            input_images_path.append(os.path.join(self.tri_root, "sequences", lines, "im%d.png" % i))
-
-                    if not os.path.exists(before_event_path[-1][-1]):
-                        continue
-                    data = {'input_images': input_images_path, 'true_images': true_images_path,
-                            'before_events': before_event_path, 'after_events': after_event_path}
-                    # print(data)
-                    self.data_dic.append(data)
-        elif self.mode == 'septuplet_train' or self.mode == 'septuplet_test':
-            if self.mode == 'septuplet_train':
-                list_path = os.path.join(self.sep_root, "sep_trainlist.txt")
-            else:
-                list_path = os.path.join(self.sep_root, "sep_testlist.txt")
-
-            with open(list_path, 'r') as file_to_read:
-                while True:
-                    lines = file_to_read.readline().strip('\n')  # 整行读取数据,去掉换行付
-                    # lines.strip()遇空白行返回FALSE
-                    if not lines or not lines.strip():
-                        break
-
-                    after_event_path = []
-                    before_event_path = []
-                    true_images_path = []
-                    input_images_path = []
-                    for i in range(1, 8):
-                        if i >= (4 - int(self.skip / 2)) and i <= (4 + int(self.skip / 2)):
-                            true_images_path.append(os.path.join(self.sep_root, "sequences", lines, "im%d.png" % i))
-                            inter_before_events = []
-                            inter_after_events = []
-                            for before_event_index in range(int(4 - self.n_inputs / 2 - int(self.skip / 2)), i):
-                                inter_before_events.append(
-                                    os.path.join(self.sep_root, "events", lines, "%010d.npz" % before_event_index))
-                            for after_event_index in range(i, int(4 + self.n_inputs / 2 + int(self.skip / 2))):
-                                inter_after_events.append(
-                                    os.path.join(self.sep_root, "events", lines, "%010d.npz" % after_event_index))
-
-                            before_event_path.append(inter_before_events)
-                            after_event_path.append(inter_after_events)
-                        elif i >= (4 - self.n_inputs / 2 - int(self.skip / 2)) and i <= (
-                                4 + self.n_inputs / 2 + int(self.skip / 2)):
-                            input_images_path.append(os.path.join(self.sep_root, "sequences", lines, "im%d.png" % i))
-
-                    if not os.path.exists(before_event_path[-1][-1]):
-                        continue
-                    data = {'input_images': input_images_path, 'true_images': true_images_path,
-                            'before_events': before_event_path, 'after_events': after_event_path}
-                    # print(data)
-                    self.data_dic.append(data)
+        if self.mode == 'triplet_train':
+            list_path = os.path.join(self.root, "tri_trainlist.txt")
+        elif self.mode == 'triplet_test':
+            list_path = os.path.join(self.root, "tri_testlist.txt")
+        elif self.mode == 'septuplet_test':
+            list_path = os.path.join(self.root, "sep_testlist.txt")
+        elif self.mode == 'septuplet_train':
+            list_path = os.path.join(self.root, "sep_trainlist.txt")
         else:
             print('this mode is not exist:', self.mode)
-            return 1
+            return None
+        with open(list_path, 'r') as file_to_read:
+            while True:
+                lines = file_to_read.readline().strip('\n')
+                if not lines or not lines.strip():
+                    break
 
+                image_files = sorted(glob.glob(os.path.join(self.root, "sequences", lines, "*.png")))
+                event_files = sorted(glob.glob(os.path.join(self.root, "events", lines, "*.npz")))
+                time_stamp_list = numpy.linspace(0, (len(image_files) - 1) / 30.0 * 1e9, len(image_files))  #ns
 
-if __name__ == '__main__':
-    train_dataset = VimeoDataset(tri_root="D:\\LHX\\CVPR\\dataset\\vimeo_triplet",
-                                 sep_root="D:\\LHX\\CVPR\\dataset\\vimeo_septuplet",
-                                 num_bins=5,
-                                 mode='septuplet_test',
-                                 n_inputs=6,
-                                 skip=1)
-    # train_dataset = VimeoDataset(tri_root="/gs/home/jinjing/NewEventTransformer/vimeo_triplet",
-    #                              sep_root="/gs/home/jinjing/NewEventTransformer/vimeo_septuplet",
-    #                              num_bins=5,
-    #                              mode='triplet_train',
-    #                               n_inputs=2,
-    #                               skip=1)
+                for i in range(len(image_files)):
+                    if i % (self.skip + 1) == 0:
+                        start_img_index = i
+                        end_img_index = start_img_index + self.skip + 1
+                        inter_events = []
+
+                        if end_img_index <= (len(image_files) - 1) and end_img_index <= len(event_files):
+                            for index_event in range(start_img_index, end_img_index):
+                                inter_events.append(event_files[index_event])
+
+                            boundary_timestamps = [time_stamp_list[start_img_index],
+                                                   time_stamp_list[end_img_index]]
+                            data = {"start_image": image_files[start_img_index],
+                                    "end_image": image_files[end_img_index],
+                                    "mid": [],
+                                    "timestamps": boundary_timestamps,
+                                    "event_files": inter_events
+                                    }
+
+                            if self.label_require:
+                                for j in range(self.num_inter):
+                                    true_img_index = start_img_index + j + 1
+                                    true_img = image_files[true_img_index]
+                                    data["mid"].append(
+                                        {"true_image": true_img,
+                                         "mid_timestamp": time_stamp_list[true_img_index]})
+                            self.data_dic.append(data)
