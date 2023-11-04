@@ -28,7 +28,7 @@ numpy==1.24.3
 packaging==23.0
 partd==1.2.0
 Pillow==9.5.0
-pip==23.0.1
+pip==23.3
 pycparser==2.21
 pyOpenSSL==23.0.0
 PySocks==1.7.1
